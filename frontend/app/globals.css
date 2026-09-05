@@ -1,0 +1,22 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --font-inter: "Inter", system-ui, sans-serif;
+  --font-tiro: "Tiro Devanagari Hindi", serif;
+}
+
+* {
+  scrollbar-width: thin;
+  scrollbar-color: #b3bac2 transparent;
+}
+
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-thumb {
+  background-color: #b3bac2;
+  border-radius: 9999px;
+}
