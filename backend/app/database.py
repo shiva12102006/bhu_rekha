@@ -36,7 +36,7 @@ DATABASE_URL = os.getenv(
 engine = create_async_engine(
     DATABASE_URL,
     echo=False,
-    pool_pre_ping=True,   # Auto-reconnect stale MySQL connections
+    pool_pre_ping=False,   # Auto-reconnect stale MySQL connections
     pool_recycle=1800,    # Recycle connections every 30 min (MySQL wait_timeout safety)
     pool_size=10,
     max_overflow=20,
