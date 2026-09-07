@@ -53,3 +53,29 @@ async def login_user(payload: UserCreate, db: AsyncSession = Depends(get_db)) ->
     if not user or not pwd_context.verify(payload.password, user.password_hash):
         raise HTTPException(status_code=401, detail="Invalid username or password.")
     return UserOut.model_validate(user)
+
+
+# ---------------------------------------------------------------------------
+# RBAC Dependencies (Simulated JWT decoding for Hackathon Demo)
+# ---------------------------------------------------------------------------
+from fastapi.security import OAuth2PasswordBearer
+
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="api/v1/auth/login")
+
+async def get_current_user(token: str = Depends(oauth2_scheme), db: AsyncSession = Depends(get_db)) -> User:
+    # For a real implementation, decode JWT and find user. 
+    # Here, we assume the token is just the username for demo ease, or fallback to Admin if invalid.
+    result = await db.execute(select(User).where(User.username == token))
+    user = result.scalar_one_or_none()
+    if not user:
+        # Fallback dummy user for demo if token parsing fails
+        result = await db.execute(select(User))
+        user = result.scalars().first()
+        if not user:
+             raise HTTPException(status_code=401, detail="Not authenticated")
+    return user
+
+async def get_current_patwari(user: User = Depends(get_current_user)) -> User:
+    if user.role not in [UserRole.PATWARI, UserRole.ADMIN]:
+        raise HTTPException(status_code=403, detail="Not enough privileges. Patwari role required.")
+    return user

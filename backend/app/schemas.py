@@ -54,6 +54,8 @@ class LandRecordUploadResponse(LandRecordBase):
     field_confidence: FieldConfidence
     extracted_text: str
     status: str
+    is_verified_by_bhulekh: bool = False
+    verification_warnings: Optional[str] = None
     created_at: datetime
 
 
@@ -66,6 +68,8 @@ class LandRecordListItem(LandRecordBase):
     confidence_score: float
     status: str
     district: Optional[str] = None
+    is_verified_by_bhulekh: bool = False
+    verification_warnings: Optional[str] = None
     updated_at: datetime
 
 

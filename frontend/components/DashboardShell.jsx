@@ -25,6 +25,7 @@ const NAV_ITEMS = [
   { label: "Overview", href: "/dashboard", icon: LayoutDashboard },
   { label: "Upload Record", href: "/dashboard/upload", icon: Upload },
   { label: "Verification Queue", href: "/dashboard?tab=queue", icon: FileCheck2 },
+  { label: "GIS Map", href: "/dashboard/map", icon: Landmark },
   { label: "Bhulekh Portal", href: "/bhulekh", icon: Landmark },
 ];
 

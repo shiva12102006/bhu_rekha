@@ -24,6 +24,7 @@ from sqlalchemy import (
     String,
     Text,
     DateTime,
+    Boolean,
     func,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -79,6 +80,7 @@ class LandRecord(Base):
     # --- Source document ---
     file_name: Mapped[str] = mapped_column(String(255), nullable=False)
     file_url: Mapped[str] = mapped_column(String(500), nullable=False)
+    file_hash: Mapped[str | None] = mapped_column(String(64), index=True, nullable=True)
 
     # --- Extracted land record fields ---
     owner_name: Mapped[str | None] = mapped_column(String(150), nullable=True)
@@ -97,6 +99,13 @@ class LandRecord(Base):
     # {"owner_name": 92.5, "khasra_no": 54.0, ...}
     field_confidence_json: Mapped[str | None] = mapped_column(Text, nullable=True)
     extracted_text: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    # --- Cross-Database Verification ---
+    is_verified_by_bhulekh: Mapped[bool] = mapped_column(
+        Boolean, default=False, nullable=False
+    )
+    # JSON-encoded array of warning strings from external validation
+    verification_warnings: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     status: Mapped[RecordStatus] = mapped_column(
         Enum(RecordStatus, native_enum=False, length=30),
@@ -136,3 +145,38 @@ class AuditTrail(Base):
 
     def __repr__(self) -> str:  # pragma: no cover
         return f"<AuditTrail user_id={self.user_id} action={self.action} record={self.target_record_id}>"
+
+# ---------------------------------------------------------------------------
+# Plot Geometries (MySQL Spatial via WKT)
+# ---------------------------------------------------------------------------
+class PlotGeometry(Base):
+    __tablename__ = "plot_geometries"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    khasra_no: Mapped[str] = mapped_column(String(50), nullable=False, unique=True, index=True)
+    # Storing Polygon geometry as Well-Known Text (WKT) 
+    coordinates_wkt: Mapped[str] = mapped_column(Text, nullable=False)
+    village: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    area_sqm: Mapped[float | None] = mapped_column(Float, nullable=True)
+    
+    def __repr__(self) -> str:  # pragma: no cover
+        return f"<PlotGeometry id={self.id} khasra_no={self.khasra_no}>"
+
+
+# ---------------------------------------------------------------------------
+# AI Learning / Correction Feedback
+# ---------------------------------------------------------------------------
+class CorrectionFeedback(Base):
+    __tablename__ = "correction_feedback"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    target_record_id: Mapped[int] = mapped_column(ForeignKey("land_records.id"), nullable=False)
+    field_name: Mapped[str] = mapped_column(String(50), nullable=False)
+    original_value: Mapped[str | None] = mapped_column(Text, nullable=True)
+    corrected_value: Mapped[str | None] = mapped_column(Text, nullable=True)
+    patwari_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+
+    def __repr__(self) -> str:  # pragma: no cover
+        return f"<CorrectionFeedback field={self.field_name} orig={self.original_value} corr={self.corrected_value}>"
+

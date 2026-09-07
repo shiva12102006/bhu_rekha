@@ -17,6 +17,7 @@ import {
   AlertOctagon,
   ArrowRight,
   RefreshCcw,
+  Trash2,
 } from "lucide-react";
 import DashboardShell from "@/components/DashboardShell";
 import StatCard from "@/components/StatCard";
@@ -43,6 +44,27 @@ export default function DashboardPage() {
       setError(err.message);
     } finally {
       setLoading(false);
+    }
+  }
+
+  async function handleDelete(e, recordId) {
+    e.preventDefault();
+    if (!confirm("Are you sure you want to delete this record?")) return;
+    try {
+      const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"}/api/v1/land/records/${recordId}`, {
+        method: "DELETE",
+        headers: {
+          "Authorization": `Bearer ${localStorage.getItem("bhu_rekha_token") || "admin"}`,
+        }
+      });
+      if (response.ok) {
+        setQueue(queue.filter(r => r.id !== recordId));
+        loadData();
+      } else {
+        alert("Failed to delete record.");
+      }
+    } catch (err) {
+      alert("Error deleting record.");
     }
   }
 
@@ -152,20 +174,29 @@ export default function DashboardPage() {
                       Khasra {record.khasra_no || "—"} &middot; {record.district || "Unknown district"}
                     </p>
                   </div>
-                  <div className="flex items-center gap-2">
-                    <span
-                      className={`rounded-full px-2 py-0.5 text-xs font-medium ${
-                        record.confidence_score < 70
-                          ? "bg-amber-100 text-amber-700"
-                          : "bg-forest-100 text-forest-700"
-                      }`}
+                  <div className="flex items-center gap-4">
+                    <div className="flex items-center gap-2">
+                      <span
+                        className={`rounded-full px-2 py-0.5 text-xs font-medium ${
+                          record.confidence_score < 70
+                            ? "bg-amber-100 text-amber-700"
+                            : "bg-forest-100 text-forest-700"
+                        }`}
+                      >
+                        {record.confidence_score.toFixed(0)}%
+                      </span>
+                      <ArrowRight
+                        size={14}
+                        className="text-slate-300 transition-transform group-hover:translate-x-0.5 group-hover:text-forest-600"
+                      />
+                    </div>
+                    <button 
+                      onClick={(e) => handleDelete(e, record.id)}
+                      className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded"
+                      title="Delete Record"
                     >
-                      {record.confidence_score.toFixed(0)}%
-                    </span>
-                    <ArrowRight
-                      size={14}
-                      className="text-slate-300 transition-transform group-hover:translate-x-0.5 group-hover:text-forest-600"
-                    />
+                      <Trash2 size={16} />
+                    </button>
                   </div>
                 </Link>
               ))

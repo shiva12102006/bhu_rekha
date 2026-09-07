@@ -53,9 +53,10 @@ export const api = {
       body: JSON.stringify(payload),
     }),
 
-  uploadRecord: (file) => {
+  uploadRecord: (file, language = "hi") => {
     const formData = new FormData();
     formData.append("file", file);
+    formData.append("language", language);
     return fetch(`${API_BASE_URL}/api/v1/land/upload`, {
       method: "POST",
       body: formData,

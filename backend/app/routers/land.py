@@ -20,13 +20,14 @@ from datetime import datetime
 from typing import Optional
 
 import aiofiles
-from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, status
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile, status
 from sqlalchemy import case, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
-from app.models import AuditTrail, LandRecord, RecordStatus
+from app.models import AuditTrail, LandRecord, RecordStatus, CorrectionFeedback, PlotGeometry, User
 from app.ocr_engine import run_ocr_pipeline
+from app.routers.auth import get_current_patwari
 from app.schemas import (
     BhulekhCertificate,
     DashboardStats,
@@ -57,6 +58,7 @@ os.makedirs(UPLOAD_DIR, exist_ok=True)
 )
 async def upload_land_record(
     file: UploadFile = File(..., description="Scanned image or PDF of the land record"),
+    language: str = Form("hi", description="Language code for OCR (hi, ta, te, etc.)"),
     db: AsyncSession = Depends(get_db),
 ) -> LandRecordUploadResponse:
     ext = os.path.splitext(file.filename or "")[1].lower()
@@ -70,32 +72,107 @@ async def upload_land_record(
     if not file_bytes:
         raise HTTPException(status_code=400, detail="Uploaded file is empty.")
 
+    # --- Document Caching (Duplicate upload prevention) ---
+    import hashlib
+    file_hash = hashlib.sha256(file_bytes).hexdigest()
+    
+    existing_record_query = await db.execute(select(LandRecord).where(LandRecord.file_hash == file_hash))
+    existing_record = existing_record_query.scalar_one_or_none()
+    
+    if existing_record:
+        return LandRecordUploadResponse(
+            id=existing_record.id,
+            record_uid=existing_record.record_uid,
+            file_name=existing_record.file_name,
+            file_url=existing_record.file_url,
+            owner_name=existing_record.owner_name,
+            survey_no=existing_record.survey_no,
+            khasra_no=existing_record.khasra_no,
+            khata_no=existing_record.khata_no,
+            plot_area=existing_record.plot_area,
+            village=existing_record.village,
+            tehsil=existing_record.tehsil,
+            district=existing_record.district,
+            land_classification=existing_record.land_classification,
+            confidence_score=existing_record.confidence_score,
+            field_confidence=FieldConfidence(**json.loads(existing_record.field_confidence_json or "{}")),
+            extracted_text=existing_record.extracted_text or "",
+            status=existing_record.status.value,
+            is_verified_by_bhulekh=existing_record.is_verified_by_bhulekh,
+            verification_warnings=existing_record.verification_warnings,
+            created_at=existing_record.created_at,
+        )
+
     # --- Persist raw file to disk (would be S3/GCS/object storage in prod) ---
     stored_name = f"{uuid.uuid4()}{ext}"
     stored_path = os.path.join(UPLOAD_DIR, stored_name)
     async with aiofiles.open(stored_path, "wb") as out_file:
         await out_file.write(file_bytes)
 
-    # --- Step 1 & 2: Run mock multilingual OCR + keyword extraction ---
-    ocr_result = run_ocr_pipeline(file_bytes, file.filename or stored_name)
+    # --- AI Learning Loop: Fetch Patwari Corrections ---
+    # Fetch recent corrections to auto-apply them to raw OCR text
+    # We only take non-empty strings longer than 2 chars to avoid replacing common small tokens
+    corrections_query = await db.execute(
+        select(CorrectionFeedback.original_value, CorrectionFeedback.corrected_value)
+        .where(
+            CorrectionFeedback.original_value.is_not(None),
+            CorrectionFeedback.corrected_value.is_not(None),
+            func.length(CorrectionFeedback.original_value) > 2
+        )
+        .order_by(CorrectionFeedback.created_at.desc())
+        .limit(100)
+    )
+    
+    learned_corrections = {}
+    for orig, corr in corrections_query.all():
+        if orig and corr:
+            learned_corrections[orig] = corr
 
+    # --- Step 1 & 2: Run multilingual OCR + AI Learning Auto-Correction ---
+    ocr_result = run_ocr_pipeline(file_bytes, file.filename or stored_name, language, learned_corrections)
+
+    khasra_no_ext = ocr_result.fields.get("khasra_no")
+    overall_confidence = ocr_result.overall_confidence
+    
+    # --- CROSS-DATABASE VERIFICATION (Mock Bhulekh API) ---
+    from app.services.mock_bhulekh_api import verify_with_bhulekh
+    
+    is_verified_bhulekh = False
+    verification_warnings = []
+    
+    owner_ext = ocr_result.fields.get("owner_name") or ""
+    area_ext = ocr_result.fields.get("plot_area") or ""
+    
+    if khasra_no_ext:
+        is_verified_bhulekh, warnings = verify_with_bhulekh(khasra_no_ext, owner_ext, area_ext)
+        if warnings:
+            # Drop confidence significantly if mismatches found
+            overall_confidence = min(overall_confidence, 35.0)
+            verification_warnings = warnings
+    else:
+        verification_warnings.append("No Khasra Number found to verify against Bhulekh.")
+        overall_confidence = min(overall_confidence, 45.0)
+            
     # --- Step 3: confidence already computed inside pipeline ---
     record = LandRecord(
         file_name=file.filename or stored_name,
         file_url=f"/static/{UPLOAD_DIR}/{stored_name}",
+        file_hash=file_hash,
         owner_name=ocr_result.fields.get("owner_name") or None,
         survey_no=ocr_result.fields.get("survey_no") or None,
-        khasra_no=ocr_result.fields.get("khasra_no") or None,
+        khasra_no=khasra_no_ext or None,
         khata_no=ocr_result.fields.get("khata_no") or None,
         plot_area=ocr_result.fields.get("plot_area") or None,
         village=ocr_result.fields.get("village") or None,
         tehsil=ocr_result.fields.get("tehsil") or None,
         district=ocr_result.fields.get("district") or None,
         land_classification=ocr_result.fields.get("land_classification") or None,
-        confidence_score=ocr_result.overall_confidence,
+        confidence_score=overall_confidence,
         field_confidence_json=json.dumps(ocr_result.field_confidence),
         extracted_text=ocr_result.extracted_text,
         status=RecordStatus.PENDING_VERIFICATION,
+        is_verified_by_bhulekh=is_verified_bhulekh,
+        verification_warnings=json.dumps(verification_warnings) if verification_warnings else None,
     )
 
     # --- Step 4: Save with status 'pending_verification' ---
@@ -121,8 +198,35 @@ async def upload_land_record(
         field_confidence=FieldConfidence(**ocr_result.field_confidence),
         extracted_text=record.extracted_text or "",
         status=record.status.value,
+        is_verified_by_bhulekh=record.is_verified_by_bhulekh,
+        verification_warnings=record.verification_warnings,
         created_at=record.created_at,
     )
+
+
+@router.post(
+    "/enhance",
+    summary="Enhance image for the Before/After Restoration Slider",
+)
+async def enhance_image(
+    file: UploadFile = File(...),
+) -> dict:
+    import base64
+    from app.services.vision import denoise_image, deskew_image
+
+    file_bytes = await file.read()
+    
+    # Run the OpenCV computer vision pipeline
+    deskewed = deskew_image(file_bytes)
+    denoised = denoise_image(deskewed)
+
+    # Return base64 so frontend can render it immediately without saving
+    encoded = base64.b64encode(denoised).decode("utf-8")
+    
+    return {
+        "success": True,
+        "enhanced_image_base64": f"data:image/jpeg;base64,{encoded}"
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -189,6 +293,8 @@ async def get_land_record(record_id: int, db: AsyncSession = Depends(get_db)) ->
         field_confidence=FieldConfidence(**field_conf),
         extracted_text=record.extracted_text or "",
         status=record.status.value,
+        is_verified_by_bhulekh=record.is_verified_by_bhulekh,
+        verification_warnings=record.verification_warnings,
         created_at=record.created_at,
         verified_by=record.verified_by,
         updated_at=record.updated_at,
@@ -207,22 +313,34 @@ async def verify_land_record(
     record_id: int,
     payload: LandRecordVerifyPayload,
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_patwari),
 ) -> LandRecordVerifyResponse:
     record = await db.get(LandRecord, record_id)
     if not record:
         raise HTTPException(status_code=404, detail="Land record not found.")
 
-    # Apply corrected fields from the Patwari's review
+    # Apply corrected fields from the Patwari's review and log feedback for AI learning
     update_data = payload.model_dump(exclude={"verified_by_user_id"}, exclude_unset=True)
     for field_name, value in update_data.items():
+        original_val = getattr(record, field_name)
+        if original_val != value:
+            # Add to CorrectionFeedback for AI re-training loop
+            feedback = CorrectionFeedback(
+                target_record_id=record.id,
+                field_name=field_name,
+                original_value=original_val,
+                corrected_value=value,
+                patwari_id=current_user.id
+            )
+            db.add(feedback)
         setattr(record, field_name, value)
 
     record.status = RecordStatus.VERIFIED
-    record.verified_by = payload.verified_by_user_id
+    record.verified_by = current_user.id
     record.updated_at = datetime.utcnow()
 
     audit_entry = AuditTrail(
-        user_id=payload.verified_by_user_id,
+        user_id=current_user.id,
         action="VERIFIED_RECORD",
         target_record_id=record.id,
     )
@@ -238,6 +356,24 @@ async def verify_land_record(
         updated_at=record.updated_at,
     )
 
+@router.delete(
+    "/records/{record_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="Delete a land record",
+)
+async def delete_land_record(
+    record_id: int,
+    db: AsyncSession = Depends(get_db),
+    # Require authorization to delete (e.g., Patwari/Admin)
+    current_user: User = Depends(get_current_patwari),
+):
+    record = await db.get(LandRecord, record_id)
+    if not record:
+        raise HTTPException(status_code=404, detail="Land record not found.")
+
+    await db.delete(record)
+    await db.commit()
+    return None
 
 # ---------------------------------------------------------------------------
 # 5. ANALYTICS (Executive Dashboard)

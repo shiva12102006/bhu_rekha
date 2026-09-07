@@ -25,7 +25,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
 from app.database import init_models
-from app.routers import auth, land
+from app.routers import auth, land, gis
 
 UPLOAD_DIR = os.getenv("UPLOAD_DIR", "uploads")
 os.makedirs(UPLOAD_DIR, exist_ok=True)
@@ -74,6 +74,7 @@ app.mount(f"/static/{UPLOAD_DIR}", StaticFiles(directory=UPLOAD_DIR), name="uplo
 # ---------------------------------------------------------------------------
 app.include_router(land.router)
 app.include_router(auth.router)
+app.include_router(gis.router)
 
 
 @app.get("/", tags=["Health"])

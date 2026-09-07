@@ -23,6 +23,7 @@ import {
 import DashboardShell from "@/components/DashboardShell";
 import ConfidenceField from "@/components/ConfidenceField";
 import { api, API_BASE_URL } from "@/lib/api";
+import { useAuth } from "@/lib/AuthContext";
 
 const FIELD_DEFS = [
   { name: "owner_name", label: "Owner Name" },
@@ -36,11 +37,10 @@ const FIELD_DEFS = [
   { name: "land_classification", label: "Land Classification" },
 ];
 
-const CURRENT_USER_ID = 1; // Demo stand-in for authenticated Patwari (replace w/ auth context)
-
 export default function VerifyRecordPage() {
   const { id } = useParams();
   const router = useRouter();
+  const { user } = useAuth();
 
   const [record, setRecord] = useState(null);
   const [formData, setFormData] = useState({});
@@ -75,7 +75,7 @@ export default function VerifyRecordPage() {
     setSaving(true);
     setError(null);
     try {
-      await api.verifyRecord(id, { ...formData, verified_by_user_id: CURRENT_USER_ID });
+      await api.verifyRecord(id, { ...formData, verified_by_user_id: user?.id || 1 });
       setSaved(true);
       setTimeout(() => router.push("/dashboard"), 1400);
     } catch (err) {
@@ -186,6 +186,28 @@ export default function VerifyRecordPage() {
         {/* RIGHT PANEL: Editable Verification Form (50%) */}
         <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-card">
           <h2 className="mb-4 font-display text-lg text-slate-900">Extracted Land Record Details</h2>
+
+          {record.verification_warnings && (
+            <div className="mb-6 rounded-lg border-l-4 border-amber-500 bg-amber-50 p-4">
+              <div className="flex items-start">
+                <div className="flex-shrink-0">
+                  <span className="text-amber-500 text-lg">⚠️</span>
+                </div>
+                <div className="ml-3">
+                  <h3 className="text-sm font-medium text-amber-800">
+                    Cross-Database Verification Failed
+                  </h3>
+                  <div className="mt-2 text-sm text-amber-700">
+                    <ul className="list-disc pl-5 space-y-1">
+                      {JSON.parse(record.verification_warnings).map((warning, idx) => (
+                        <li key={idx}>{warning}</li>
+                      ))}
+                    </ul>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
 
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
             {FIELD_DEFS.map(({ name, label }) => (
