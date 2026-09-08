@@ -83,15 +83,15 @@ class LandRecord(Base):
     file_hash: Mapped[str | None] = mapped_column(String(64), index=True, nullable=True)
 
     # --- Extracted land record fields ---
-    owner_name: Mapped[str | None] = mapped_column(String(150), nullable=True)
-    survey_no: Mapped[str | None] = mapped_column(String(50), nullable=True)
-    khasra_no: Mapped[str | None] = mapped_column(String(50), nullable=True)
-    khata_no: Mapped[str | None] = mapped_column(String(50), nullable=True)
-    plot_area: Mapped[str | None] = mapped_column(String(50), nullable=True)  # e.g. "2.35 Hectare"
-    village: Mapped[str | None] = mapped_column(String(100), nullable=True)
-    tehsil: Mapped[str | None] = mapped_column(String(100), nullable=True)
-    district: Mapped[str | None] = mapped_column(String(100), nullable=True)
-    land_classification: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    owner_name: Mapped[str | None] = mapped_column(Text, nullable=True)
+    survey_no: Mapped[str | None] = mapped_column(Text, nullable=True)
+    khasra_no: Mapped[str | None] = mapped_column(Text, nullable=True)
+    khata_no: Mapped[str | None] = mapped_column(Text, nullable=True)
+    plot_area: Mapped[str | None] = mapped_column(Text, nullable=True)  # e.g. "2.35 Hectare"
+    village: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    tehsil: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    district: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    land_classification: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     # --- AI / OCR metadata ---
     confidence_score: Mapped[float] = mapped_column(Float, default=0.0)
